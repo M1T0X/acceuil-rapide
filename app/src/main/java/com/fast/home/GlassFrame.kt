@@ -7,16 +7,19 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.widget.FrameLayout
+import kotlin.math.max
 
 class GlassFrame(
     ctx: Context,
     private val bgView: NatureView,
     private val radius: Float,
-    private val border: Float
+    private val border: Float,
+    private val showBorder: Boolean = true
 ) : FrameLayout(ctx) {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -42,32 +45,60 @@ class GlassFrame(
         clip.addRoundRect(rect, radius, radius, Path.Direction.CW)
         c.save()
         c.clipPath(clip)
-        drawBlur(c, bgView.blurCur, 255)
+
+        val blur = bgView.blurCur
+        drawBlur(c, blur, 255)
         val n = bgView.blurNxt
         if (n != null) drawBlur(c, n, (bgView.fadeValue * 255).toInt())
+
         paint.shader = null
         paint.style = Paint.Style.FILL
-        paint.color = Color.argb(105, 10, 12, 22)
+        paint.color = Color.argb(if (blur != null) 100 else 78, 12, 14, 24)
         c.drawRect(rect, paint)
+
         paint.shader = LinearGradient(
-            0f, 0f, 0f, h,
-            Color.argb(60, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP
+            0f, 0f, 0f, h * 0.65f,
+            Color.argb(66, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP
+        )
+        c.drawRect(rect, paint)
+
+        paint.shader = RadialGradient(
+            w * 0.14f, 0f, max(w, h) * 0.75f,
+            Color.argb(70, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP
+        )
+        c.drawRect(rect, paint)
+
+        paint.shader = LinearGradient(
+            0f, h * 0.5f, 0f, h,
+            Color.argb(0, 0, 0, 0), Color.argb(55, 0, 0, 0), Shader.TileMode.CLAMP
         )
         c.drawRect(rect, paint)
         paint.shader = null
         c.restore()
 
-        val half = border / 2f
-        rect.set(half, half, w - half, h - half)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = border
-        paint.shader = LinearGradient(
-            0f, 0f, w, h,
-            Color.argb(210, 255, 255, 255), Color.argb(50, 255, 255, 255), Shader.TileMode.CLAMP
-        )
-        c.drawRoundRect(rect, radius - half, radius - half, paint)
-        paint.shader = null
-        paint.style = Paint.Style.FILL
+        if (showBorder && border > 0f) {
+            val half = border / 2f
+            rect.set(half, half, w - half, h - half)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = border
+            paint.shader = LinearGradient(
+                0f, 0f, w, h,
+                Color.argb(220, 255, 255, 255), Color.argb(45, 255, 255, 255), Shader.TileMode.CLAMP
+            )
+            c.drawRoundRect(rect, radius - half, radius - half, paint)
+
+            val inset = border * 1.8f
+            rect.set(inset, inset, w - inset, h - inset)
+            paint.strokeWidth = border * 0.6f
+            paint.shader = LinearGradient(
+                0f, 0f, 0f, h,
+                Color.argb(70, 255, 255, 255), Color.argb(10, 255, 255, 255), Shader.TileMode.CLAMP
+            )
+            val r2 = max(0f, radius - inset)
+            c.drawRoundRect(rect, r2, r2, paint)
+            paint.shader = null
+            paint.style = Paint.Style.FILL
+        }
     }
 
     private fun drawBlur(c: Canvas, b: Bitmap?, alpha: Int) {
