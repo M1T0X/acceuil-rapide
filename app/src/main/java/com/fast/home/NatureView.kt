@@ -27,6 +27,12 @@ import kotlin.math.sin
 class NatureView(ctx: Context) : View(ctx) {
 
     private class Scene(val sky: IntArray, val layers: IntArray, val sun: Int, val sx: Float, val sy: Float)
+    private class Frame(val full: Bitmap, val blur: Bitmap)
+
+    var onFrame: (() -> Unit)? = null
+    val blurCur: Bitmap? get() = cur?.blur
+    val blurNxt: Bitmap? get() = nxt?.blur
+    val fadeValue: Float get() = fade
 
     private fun cols(vararg v: Long) = IntArray(v.size) { v[it].toInt() }
 
@@ -43,8 +49,8 @@ class NatureView(ctx: Context) : View(ctx) {
             0xFFFFE3A0.toInt(), 0.25f, 0.60f)
     )
 
-    private var cur: Bitmap? = null
-    private var nxt: Bitmap? = null
+    private var cur: Frame? = null
+    private var nxt: Frame? = null
     private var fade = 0f
     private var index = 0
     private var busy = false
@@ -54,11 +60,16 @@ class NatureView(ctx: Context) : View(ctx) {
     private val exec = Executors.newSingleThreadExecutor()
     private val rotate = Runnable { advance() }
 
+    private fun changed() {
+        invalidate()
+        onFrame?.invoke()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         if (w > 0 && h > 0 && cur == null) {
             exec.execute {
-                val b = render(0, w, h)
-                ui.post { cur = b; invalidate(); schedule() }
+                val f = render(0, w, h)
+                ui.post { cur = f; changed(); schedule() }
             }
         }
     }
@@ -79,19 +90,19 @@ class NatureView(ctx: Context) : View(ctx) {
         val w = width
         val h = height
         exec.execute {
-            val b = render(i, w, h)
+            val f = render(i, w, h)
             ui.post {
-                nxt = b
+                nxt = f
                 val anim = ValueAnimator.ofFloat(0f, 1f)
                 anim.duration = 2500
-                anim.addUpdateListener { fade = it.animatedValue as Float; invalidate() }
+                anim.addUpdateListener { fade = it.animatedValue as Float; changed() }
                 anim.addListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(a: Animator) {
                         cur = nxt
                         nxt = null
                         fade = 0f
                         busy = false
-                        invalidate()
+                        changed()
                         schedule()
                     }
                 })
@@ -103,8 +114,8 @@ class NatureView(ctx: Context) : View(ctx) {
     override fun onDraw(c: Canvas) {
         dst.set(0, 0, width, height)
         c.drawColor(Color.BLACK)
-        cur?.let { paint.alpha = 255; c.drawBitmap(it, null, dst, paint) }
-        nxt?.let { paint.alpha = (fade * 255).toInt(); c.drawBitmap(it, null, dst, paint); paint.alpha = 255 }
+        cur?.let { paint.alpha = 255; c.drawBitmap(it.full, null, dst, paint) }
+        nxt?.let { paint.alpha = (fade * 255).toInt(); c.drawBitmap(it.full, null, dst, paint); paint.alpha = 255 }
     }
 
     private fun photoFiles(): List<File> = try {
@@ -113,15 +124,22 @@ class NatureView(ctx: Context) : View(ctx) {
             ?.sortedBy { it.name } ?: emptyList()
     } catch (e: Throwable) { emptyList() }
 
-    private fun render(i: Int, w: Int, h: Int): Bitmap {
+    private fun makeFrame(full: Bitmap): Frame {
+        val a = Bitmap.createScaledBitmap(full, max(2, full.width / 4), max(2, full.height / 4), true)
+        val b = Bitmap.createScaledBitmap(a, max(2, full.width / 20), max(2, full.height / 20), true)
+        if (a !== b) a.recycle()
+        return Frame(full, b)
+    }
+
+    private fun render(i: Int, w: Int, h: Int): Frame {
         val s = if (w > 1280) 1280f / w else 1f
         val rw = max(2, (w * s).toInt())
         val rh = max(2, (h * s).toInt())
         val photos = photoFiles()
         if (photos.isNotEmpty()) {
-            decodePhoto(photos[i % photos.size], rw, rh)?.let { return it }
+            decodePhoto(photos[i % photos.size], rw, rh)?.let { return makeFrame(it) }
         }
-        return drawScene(scenes[i % scenes.size], rw, rh)
+        return makeFrame(drawScene(scenes[i % scenes.size], rw, rh))
     }
 
     private fun decodePhoto(f: File, rw: Int, rh: Int): Bitmap? = try {
