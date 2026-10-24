@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
 class HomeService : AccessibilityService() {
@@ -27,6 +28,14 @@ class HomeService : AccessibilityService() {
     override fun onDestroy() {
         try { unregisterReceiver(receiver) } catch (e: Exception) { }
         super.onDestroy()
+    }
+
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_HOME) {
+            if (event.action == KeyEvent.ACTION_DOWN) openHome()
+            return true
+        }
+        return super.onKeyEvent(event)
     }
 
     private fun openHome() {
