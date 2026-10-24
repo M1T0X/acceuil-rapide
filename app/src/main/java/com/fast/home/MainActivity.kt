@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -31,11 +32,13 @@ class MainActivity : Activity() {
         "com.netflix.ninja,com.amazon.firetv.youtube,com.canal.android.canal,tv.molotov.app,fr.tf1.mytf1"
 
     private lateinit var bg: NatureView
-    private lateinit var clock: TextView
-    private lateinit var dateTv: TextView
-    private lateinit var nameTv: TextView
+    private lateinit var clockTv: TextView
+    private lateinit var heroTitle: TextView
+    private lateinit var heroSub: TextView
     private lateinit var favRow: LinearLayout
     private lateinit var dockRow: LinearLayout
+    private val glass = ArrayList<GlassFrame>()
+    private var unit = 1f
     private val ui = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("home", MODE_PRIVATE) }
     private val tick = object : Runnable {
@@ -45,10 +48,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun p(v: Int) = (v * unit).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        unit = resources.displayMetrics.widthPixels / 1920f
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -75,91 +79,30 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        // On reste sur l'accueil
     }
 
-    private fun buildUi() {
-        val root = FrameLayout(this)
-        bg = NatureView(this)
-        root.addView(bg, FrameLayout.LayoutParams(-1, -1))
-
-        val scrim = View(this)
-        scrim.background = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.argb(70, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(170, 0, 0, 0))
-        )
-        root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
-
-        val col = LinearLayout(this)
-        col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(64), dp(36), dp(64), dp(28))
-        root.addView(col, FrameLayout.LayoutParams(-1, -1))
-
-        clock = TextView(this)
-        clock.textSize = 44f
-        clock.setTextColor(Color.WHITE)
-        clock.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-        col.addView(clock)
-
-        dateTv = TextView(this)
-        dateTv.textSize = 20f
-        dateTv.setTextColor(Color.argb(204, 255, 255, 255))
-        col.addView(dateTv)
-
-        col.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
-
-        val favLabel = TextView(this)
-        favLabel.text = "Favoris"
-        favLabel.textSize = 18f
-        favLabel.setTextColor(Color.argb(204, 255, 255, 255))
-        col.addView(favLabel)
-
-        val favScroll = hscroll()
-        favRow = row()
-        favScroll.addView(favRow)
-        col.addView(favScroll, LinearLayout.LayoutParams(-1, -2))
-
-        nameTv = TextView(this)
-        nameTv.textSize = 22f
-        nameTv.setTextColor(Color.WHITE)
-        nameTv.gravity = Gravity.CENTER
-        nameTv.setPadding(0, dp(8), 0, dp(8))
-        col.addView(nameTv, LinearLayout.LayoutParams(-1, -2))
-
-        val dockBox = LinearLayout(this)
-        dockBox.clipChildren = false
-        dockBox.clipToPadding = false
-        dockBox.setPadding(dp(14), dp(6), dp(14), dp(6))
-        val dockBg = GradientDrawable()
-        dockBg.cornerRadius = dp(36).toFloat()
-        dockBg.setColor(Color.argb(110, 20, 20, 30))
-        dockBox.background = dockBg
-        val dockScroll = hscroll()
-        dockRow = row()
-        dockScroll.addView(dockRow)
-        dockBox.addView(dockScroll)
-        val dockLp = LinearLayout.LayoutParams(-2, -2)
-        dockLp.gravity = Gravity.CENTER_HORIZONTAL
-        col.addView(dockBox, dockLp)
-
-        val hint = TextView(this)
-        hint.text = "Maintiens OK sur une appli pour l'ajouter ou la retirer des favoris"
-        hint.textSize = 14f
-        hint.gravity = Gravity.CENTER
-        hint.setTextColor(Color.argb(150, 255, 255, 255))
-        hint.setPadding(0, dp(10), 0, 0)
-        col.addView(hint, LinearLayout.LayoutParams(-1, -2))
-
-        setContentView(root)
+    private fun tv(sizePx: Int, color: Int, font: String = "sans-serif"): TextView {
+        val t = TextView(this)
+        t.setTextSize(TypedValue.COMPLEX_UNIT_PX, p(sizePx).toFloat())
+        t.setTextColor(color)
+        t.typeface = Typeface.create(font, Typeface.NORMAL)
+        t.setShadowLayer(p(10).toFloat(), 0f, p(2).toFloat(), Color.argb(110, 0, 0, 0))
+        return t
     }
 
-    private fun hscroll(): HorizontalScrollView {
+    private fun glassPill(r: Int): GlassFrame {
+        val g = GlassFrame(this, bg, p(r).toFloat(), p(2).toFloat())
+        glass.add(g)
+        return g
+    }
+
+    private fun hscroll(h: Int, v: Int): HorizontalScrollView {
         val s = HorizontalScrollView(this)
         s.isHorizontalScrollBarEnabled = false
         s.clipToPadding = false
         s.clipChildren = false
         s.overScrollMode = View.OVER_SCROLL_NEVER
-        s.setPadding(dp(8), dp(20), dp(8), dp(20))
+        s.setPadding(h, v, h, v)
         return s
     }
 
@@ -172,11 +115,77 @@ class MainActivity : Activity() {
         return r
     }
 
+    private fun buildUi() {
+        val white = Color.WHITE
+        val soft = Color.argb(215, 255, 255, 255)
+
+        val root = FrameLayout(this)
+        bg = NatureView(this)
+        bg.onFrame = { for (g in glass) g.invalidate() }
+        root.addView(bg, FrameLayout.LayoutParams(-1, -1))
+
+        val scrim = View(this)
+        scrim.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.argb(90, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(200, 0, 0, 0))
+        )
+        root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.clipChildren = false
+        col.setPadding(p(96), p(44), p(96), p(40))
+        root.addView(col, FrameLayout.LayoutParams(-1, -1))
+
+        val top = LinearLayout(this)
+        top.gravity = Gravity.CENTER_VERTICAL
+        top.clipChildren = false
+
+        val clockPill = glassPill(44)
+        clockPill.setPadding(p(34), p(16), p(34), p(16))
+        clockTv = tv(30, white, "sans-serif-medium")
+        clockPill.addView(clockTv)
+        top.addView(clockPill, LinearLayout.LayoutParams(-2, -2))
+
+        val dockPill = glassPill(44)
+        dockPill.setPadding(p(14), 0, p(14), 0)
+        val dockScroll = hscroll(p(8), p(8))
+        dockRow = row()
+        dockScroll.addView(dockRow)
+        dockPill.addView(dockScroll, FrameLayout.LayoutParams(-1, -2))
+        val dlp = LinearLayout.LayoutParams(0, -2, 1f)
+        dlp.leftMargin = p(28)
+        top.addView(dockPill, dlp)
+        col.addView(top, LinearLayout.LayoutParams(-1, -2))
+
+        val hero = LinearLayout(this)
+        hero.orientation = LinearLayout.VERTICAL
+        hero.gravity = Gravity.BOTTOM
+        hero.setPadding(p(8), 0, 0, p(20))
+        heroTitle = tv(76, white, "sans-serif-medium")
+        heroTitle.maxLines = 1
+        heroSub = tv(28, soft)
+        hero.addView(heroTitle)
+        hero.addView(heroSub)
+        col.addView(hero, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val favLabel = tv(28, soft, "sans-serif-medium")
+        favLabel.text = "Tes favoris"
+        col.addView(favLabel)
+        val favScroll = hscroll(p(8), p(34))
+        favRow = row()
+        favScroll.addView(favRow)
+        col.addView(favScroll, LinearLayout.LayoutParams(-1, -2))
+
+        setContentView(root)
+    }
+
     private fun updateClock() {
         val now = Date()
-        clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
-        dateTv.text = SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(now)
+        val h = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
+        val d = SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(now)
             .replaceFirstChar { it.uppercase() }
+        clockTv.text = "$h   ·   $d"
     }
 
     private fun loadApps(): List<App> {
@@ -186,15 +195,15 @@ class MainActivity : Activity() {
             val q = Intent(Intent.ACTION_MAIN).addCategory(cat)
             for (ri in pm.queryIntentActivities(q, 0)) {
                 val ai = ri.activityInfo.applicationInfo
-                val p = ai.packageName
-                if (p == packageName || out.containsKey(p)) continue
+                val pk = ai.packageName
+                if (pk == packageName || out.containsKey(pk)) continue
                 val system = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
                     (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
                 if (system) continue
                 val i = Intent(Intent.ACTION_MAIN).addCategory(cat)
-                    .setClassName(p, ri.activityInfo.name)
+                    .setClassName(pk, ri.activityInfo.name)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                out[p] = App(p, ri.loadLabel(pm).toString(), i, ri)
+                out[pk] = App(pk, ri.loadLabel(pm).toString(), i, ri)
             }
         }
         return out.values.sortedBy { it.label.lowercase() }
@@ -206,14 +215,15 @@ class MainActivity : Activity() {
     private fun refresh(focusTag: String?) {
         val apps = loadApps()
         val byPkg = apps.associateBy { it.pkg }
-        val favApps = favList().mapNotNull { byPkg[it] }
+        val favs = favList()
+        val favApps = favs.mapNotNull { byPkg[it] }
         val rest = apps.filter { a -> favApps.none { it.pkg == a.pkg } }
 
         favRow.removeAllViews()
         dockRow.removeAllViews()
-        favApps.forEach { favRow.addView(tile(it)) }
-        (favApps + rest).forEach { dockRow.addView(dockIcon(it)) }
-        dockRow.addView(settingsIcon())
+        favApps.forEach { favRow.addView(card(it)) }
+        (favApps + rest).forEach { dockRow.addView(dockIcon(it, favs.contains(it.pkg))) }
+        dockRow.addView(settingsItem())
 
         if (focusTag == null || !focusByTag(focusTag)) {
             if (favRow.childCount > 0) favRow.getChildAt(0).requestFocus()
@@ -231,25 +241,35 @@ class MainActivity : Activity() {
         return false
     }
 
-    private fun focusFx(v: View, scale: Float, name: String) {
+    private fun focusFx(v: View, scale: Float, title: String, sub: String, style: GradientDrawable, card: Boolean) {
         v.isFocusable = true
         v.isClickable = true
         v.setOnFocusChangeListener { view, has ->
             val s = if (has) scale else 1f
-            view.animate().scaleX(s).scaleY(s).setDuration(140).start()
-            view.elevation = if (has) dp(10).toFloat() else 0f
-            (view.background as? GradientDrawable)?.setStroke(if (has) dp(3) else 0, Color.WHITE)
-            if (has) nameTv.text = name
+            view.animate().scaleX(s).scaleY(s).setDuration(160).start()
+            view.elevation = if (has) p(16).toFloat() else 0f
+            if (card) {
+                if (has) style.setStroke(p(6), Color.WHITE)
+                else style.setStroke(p(2), Color.argb(70, 255, 255, 255))
+            } else {
+                style.setColor(if (has) Color.argb(120, 255, 255, 255) else Color.TRANSPARENT)
+                if (has) style.setStroke(p(2), Color.argb(200, 255, 255, 255))
+                else style.setStroke(0, Color.TRANSPARENT)
+            }
+            if (has) {
+                heroTitle.text = title
+                heroSub.text = sub
+            }
         }
     }
 
-    private fun tile(a: App): View {
+    private fun card(a: App): View {
         val pm = packageManager
         val f = FrameLayout(this)
-        val d = GradientDrawable()
-        d.cornerRadius = dp(16).toFloat()
-        d.setColor(Color.argb(200, 24, 24, 32))
-        f.background = d
+        val base = GradientDrawable()
+        base.cornerRadius = p(30).toFloat()
+        base.setColor(Color.argb(200, 24, 24, 32))
+        f.background = base
         f.clipToOutline = true
 
         val banner = try {
@@ -263,55 +283,74 @@ class MainActivity : Activity() {
             f.addView(img, FrameLayout.LayoutParams(-1, -1))
         } else {
             img.setImageDrawable(a.ri.loadIcon(pm))
-            f.addView(img, FrameLayout.LayoutParams(dp(72), dp(72), Gravity.CENTER))
+            f.addView(img, FrameLayout.LayoutParams(p(96), p(96), Gravity.CENTER))
+            val name = tv(24, Color.WHITE)
+            name.text = a.label
+            f.addView(name, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
         }
 
-        val lp = LinearLayout.LayoutParams(dp(288), dp(162))
-        lp.setMargins(dp(10), 0, dp(10), 0)
+        val gloss = View(this)
+        gloss.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.argb(55, 255, 255, 255), Color.argb(0, 255, 255, 255))
+        )
+        f.addView(gloss, FrameLayout.LayoutParams(-1, p(90), Gravity.TOP))
+
+        val ring = View(this)
+        val rd = GradientDrawable()
+        rd.cornerRadius = p(30).toFloat()
+        rd.setColor(Color.TRANSPARENT)
+        rd.setStroke(p(2), Color.argb(70, 255, 255, 255))
+        ring.background = rd
+        f.addView(ring, FrameLayout.LayoutParams(-1, -1))
+
+        val lp = LinearLayout.LayoutParams(p(384), p(216))
+        lp.setMargins(p(14), 0, p(14), 0)
         f.layoutParams = lp
         f.tag = a.pkg
-        focusFx(f, 1.08f, a.label)
+        focusFx(f, 1.12f, a.label, "Favori  ·  appui long sur OK pour retirer", rd, true)
         f.setOnClickListener { go(a.intent) }
         f.setOnLongClickListener { toggleFav(a.pkg); true }
         return f
     }
 
-    private fun dockIcon(a: App): View {
+    private fun dockIcon(a: App, isFav: Boolean): View {
         val f = FrameLayout(this)
         val d = GradientDrawable()
-        d.cornerRadius = dp(22).toFloat()
-        d.setColor(Color.argb(60, 255, 255, 255))
+        d.cornerRadius = p(24).toFloat()
+        d.setColor(Color.TRANSPARENT)
         f.background = d
 
         val img = ImageView(this)
         img.setImageDrawable(a.ri.loadIcon(packageManager))
-        f.addView(img, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
+        f.addView(img, FrameLayout.LayoutParams(p(48), p(48), Gravity.CENTER))
 
-        val lp = LinearLayout.LayoutParams(dp(76), dp(76))
-        lp.setMargins(dp(8), 0, dp(8), 0)
+        val lp = LinearLayout.LayoutParams(p(68), p(68))
+        lp.setMargins(p(6), 0, p(6), 0)
         f.layoutParams = lp
         f.tag = a.pkg
-        focusFx(f, 1.25f, a.label)
+        val sub = if (isFav) "Favori  ·  appui long sur OK pour retirer"
+        else "Appui long sur OK pour ajouter aux favoris"
+        focusFx(f, 1.18f, a.label, sub, d, false)
         f.setOnClickListener { go(a.intent) }
         f.setOnLongClickListener { toggleFav(a.pkg); true }
         return f
     }
 
-    private fun settingsIcon(): View {
-        val t = TextView(this)
-        t.text = "⚙"
-        t.textSize = 30f
+    private fun settingsItem(): View {
+        val t = tv(24, Color.WHITE, "sans-serif-medium")
+        t.text = "Réglages"
         t.gravity = Gravity.CENTER
-        t.setTextColor(Color.WHITE)
+        t.setPadding(p(26), 0, p(26), 0)
         val d = GradientDrawable()
-        d.cornerRadius = dp(22).toFloat()
-        d.setColor(Color.argb(60, 255, 255, 255))
+        d.cornerRadius = p(24).toFloat()
+        d.setColor(Color.TRANSPARENT)
         t.background = d
-        val lp = LinearLayout.LayoutParams(dp(76), dp(76))
-        lp.setMargins(dp(8), 0, dp(8), 0)
+        val lp = LinearLayout.LayoutParams(-2, p(68))
+        lp.setMargins(p(6), 0, p(6), 0)
         t.layoutParams = lp
         t.tag = "settings"
-        focusFx(t, 1.25f, "Paramètres")
+        focusFx(t, 1.1f, "Réglages", "Paramètres de la Fire TV", d, false)
         t.setOnClickListener {
             go(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
