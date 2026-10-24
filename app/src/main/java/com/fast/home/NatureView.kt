@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RadialGradient
@@ -17,10 +18,12 @@ import android.graphics.Shader
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import java.io.File
 import java.util.Random
 import java.util.concurrent.Executors
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
@@ -28,11 +31,30 @@ class NatureView(ctx: Context) : View(ctx) {
 
     private class Scene(val sky: IntArray, val layers: IntArray, val sun: Int, val sx: Float, val sy: Float)
     private class Frame(val full: Bitmap, val blur: Bitmap)
+    private class Blob(
+        val color: Int, val bx: Float, val by: Float, val ax: Float, val ay: Float,
+        val sx: Float, val sy: Float, val px: Float, val py: Float, val rad: Float
+    )
 
     var onFrame: (() -> Unit)? = null
-    val blurCur: Bitmap? get() = cur?.blur
-    val blurNxt: Bitmap? get() = nxt?.blur
+    val blurCur: Bitmap? get() = if (mode == 2) cur?.blur else null
+    val blurNxt: Bitmap? get() = if (mode == 2) nxt?.blur else null
     val fadeValue: Float get() = fade
+
+    // 0 = aurore animée, 1 = noir, 2 = paysages
+    private var mode = 0
+    private var running = false
+    private val t0 = SystemClock.uptimeMillis()
+
+    private val blobs = listOf(
+        Blob(0xFFE50914.toInt(), 0.25f, 0.30f, 0.20f, 0.18f, 0.00031f, 0.00027f, 0f, 1.0f, 0.55f),
+        Blob(0xFF5B3BD6.toInt(), 0.70f, 0.25f, 0.22f, 0.20f, 0.00023f, 0.00035f, 2.0f, 0.5f, 0.60f),
+        Blob(0xFF0E7ACC.toInt(), 0.50f, 0.85f, 0.30f, 0.12f, 0.00027f, 0.00021f, 4.0f, 2.5f, 0.55f)
+    )
+    private var shaders: List<RadialGradient> = emptyList()
+    private var radii = FloatArray(0)
+    private val mat = Matrix()
+    private val apaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private fun cols(vararg v: Long) = IntArray(v.size) { v[it].toInt() }
 
@@ -59,30 +81,75 @@ class NatureView(ctx: Context) : View(ctx) {
     private val ui = Handler(Looper.getMainLooper())
     private val exec = Executors.newSingleThreadExecutor()
     private val rotate = Runnable { advance() }
+    private val loop = object : Runnable {
+        override fun run() {
+            if (running && mode == 0) {
+                invalidate()
+                ui.postDelayed(this, 66)
+            }
+        }
+    }
 
     private fun changed() {
         invalidate()
         onFrame?.invoke()
     }
 
+    fun setMode(m: Int) {
+        mode = m
+        ui.removeCallbacks(loop)
+        ui.removeCallbacks(rotate)
+        if (running) resume()
+        changed()
+    }
+
+    fun resume() {
+        running = true
+        if (mode == 0) ui.post(loop)
+        if (mode == 2) {
+            ensureNature()
+            if (cur != null) schedule()
+        }
+    }
+
+    fun pause() {
+        running = false
+        ui.removeCallbacks(loop)
+        ui.removeCallbacks(rotate)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        if (w > 0 && h > 0 && cur == null) {
+        if (w > 0 && h > 0) {
+            radii = FloatArray(blobs.size) { blobs[it].rad * h }
+            shaders = blobs.mapIndexed { i, b ->
+                RadialGradient(
+                    0f, 0f, radii[i],
+                    intArrayOf(withAlpha(b.color, 130), withAlpha(b.color, 0)), null, Shader.TileMode.CLAMP
+                )
+            }
+            ensureNature()
+        }
+    }
+
+    private fun ensureNature() {
+        if (mode == 2 && cur == null && width > 0 && height > 0 && !busy) {
+            busy = true
+            val w = width
+            val h = height
             exec.execute {
                 val f = render(0, w, h)
-                ui.post { cur = f; changed(); schedule() }
+                ui.post { cur = f; busy = false; changed(); schedule() }
             }
         }
     }
 
-    fun resume() { if (cur != null) schedule() }
-    fun pause() { ui.removeCallbacks(rotate) }
-
     private fun schedule() {
         ui.removeCallbacks(rotate)
-        ui.postDelayed(rotate, 25000)
+        if (running && mode == 2) ui.postDelayed(rotate, 25000)
     }
 
     private fun advance() {
+        if (mode != 2) return
         if (busy || width == 0) { schedule(); return }
         busy = true
         index++
@@ -112,10 +179,33 @@ class NatureView(ctx: Context) : View(ctx) {
     }
 
     override fun onDraw(c: Canvas) {
-        dst.set(0, 0, width, height)
         c.drawColor(Color.BLACK)
-        cur?.let { paint.alpha = 255; c.drawBitmap(it.full, null, dst, paint) }
-        nxt?.let { paint.alpha = (fade * 255).toInt(); c.drawBitmap(it.full, null, dst, paint); paint.alpha = 255 }
+        when (mode) {
+            0 -> drawAurora(c)
+            2 -> {
+                dst.set(0, 0, width, height)
+                cur?.let { paint.alpha = 255; c.drawBitmap(it.full, null, dst, paint) }
+                nxt?.let {
+                    paint.alpha = (fade * 255).toInt()
+                    c.drawBitmap(it.full, null, dst, paint)
+                    paint.alpha = 255
+                }
+            }
+        }
+    }
+
+    private fun drawAurora(c: Canvas) {
+        if (shaders.isEmpty()) return
+        val t = (SystemClock.uptimeMillis() - t0).toFloat()
+        for (i in blobs.indices) {
+            val b = blobs[i]
+            val cx = width * (b.bx + b.ax * sin(t * b.sx + b.px))
+            val cy = height * (b.by + b.ay * cos(t * b.sy + b.py))
+            mat.setTranslate(cx, cy)
+            shaders[i].setLocalMatrix(mat)
+            apaint.shader = shaders[i]
+            c.drawCircle(cx, cy, radii[i], apaint)
+        }
     }
 
     private fun photoFiles(): List<File> = try {
