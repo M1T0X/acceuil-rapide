@@ -1,7 +1,6 @@
 package com.fast.home
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,6 +18,8 @@ import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -36,17 +37,24 @@ class MainActivity : Activity() {
 
     private val favDefaults =
         "com.netflix.ninja,com.amazon.firetv.youtube,com.canal.android.canal,tv.molotov.app,fr.tf1.mytf1"
-    private val accent = Color.rgb(229, 9, 20)
 
+    private lateinit var root: FrameLayout
     private lateinit var bg: NatureView
     private lateinit var dim: View
+    private lateinit var topBar: LinearLayout
+    private lateinit var heroBox: LinearLayout
     private lateinit var clockTv: TextView
     private lateinit var heroTitle: TextView
     private lateinit var heroSub: TextView
     private lateinit var scroll: ScrollView
     private lateinit var favRow: LinearLayout
     private lateinit var appsRow: LinearLayout
+    private lateinit var menuTab: TextView
+    private lateinit var menuPanel: GlassFrame
+    private lateinit var menuList: LinearLayout
 
+    private val glass = ArrayList<GlassFrame>()
+    private var menuOpen = false
     private var apps: List<App> = emptyList()
     private var dirty = true
     private var unit = 1f
@@ -92,6 +100,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         ui.post(tick)
+        bg.resume()
         applyBg()
         if (dirty || favRow.childCount == 0) refresh(currentFocus?.tag as? String)
     }
@@ -104,21 +113,38 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
+        if (menuOpen) closeMenu(false)
         scroll.scrollTo(0, 0)
         if (favRow.childCount > 0) favRow.getChildAt(0).requestFocus()
+        animateIn(true)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (menuOpen) closeMenu(true)
     }
 
-    private fun nature() = prefs.getString("bg", "noir") == "nature"
+    private fun bgMode() = prefs.getString("bg", "aurore") ?: "aurore"
 
     private fun applyBg() {
-        val n = nature()
-        bg.visibility = if (n) View.VISIBLE else View.GONE
-        dim.visibility = if (n) View.VISIBLE else View.GONE
-        if (n) bg.resume() else bg.pause()
+        val m = when (bgMode()) {
+            "noir" -> 1
+            "nature" -> 2
+            else -> 0
+        }
+        bg.setMode(m)
+        dim.visibility = if (m == 2) View.VISIBLE else View.GONE
+    }
+
+    private fun cycleBg() {
+        val next = when (bgMode()) {
+            "aurore" -> "noir"
+            "noir" -> "nature"
+            else -> "aurore"
+        }
+        prefs.edit().putString("bg", next).apply()
+        applyBg()
+        Toast.makeText(this, "Fond : $next", Toast.LENGTH_SHORT).show()
     }
 
     private fun tv(sizePx: Int, color: Int, font: String = "sans-serif"): TextView {
@@ -126,7 +152,14 @@ class MainActivity : Activity() {
         t.setTextSize(TypedValue.COMPLEX_UNIT_PX, p(sizePx).toFloat())
         t.setTextColor(color)
         t.typeface = Typeface.create(font, Typeface.NORMAL)
+        t.setShadowLayer(p(8).toFloat(), 0f, p(2).toFloat(), Color.argb(120, 0, 0, 0))
         return t
+    }
+
+    private fun glassPill(r: Int): GlassFrame {
+        val g = GlassFrame(this, bg, p(r).toFloat(), p(2).toFloat())
+        glass.add(g)
+        return g
     }
 
     private fun hscroll(h: Int, v: Int): HorizontalScrollView {
@@ -156,11 +189,11 @@ class MainActivity : Activity() {
     }
 
     private fun tab(label: String, action: () -> Unit): TextView {
-        val idle = Color.argb(190, 255, 255, 255)
+        val idle = Color.argb(200, 255, 255, 255)
         val t = tv(28, idle, "sans-serif-medium")
         t.text = label
         t.gravity = Gravity.CENTER
-        t.setPadding(p(26), p(10), p(26), p(10))
+        t.setPadding(p(28), p(12), p(28), p(12))
         val d = GradientDrawable()
         d.cornerRadius = p(30).toFloat()
         d.setColor(Color.TRANSPARENT)
@@ -170,28 +203,55 @@ class MainActivity : Activity() {
         t.setOnFocusChangeListener { _, has ->
             d.setColor(if (has) Color.WHITE else Color.TRANSPARENT)
             t.setTextColor(if (has) Color.BLACK else idle)
-            if (has) {
-                heroTitle.text = "Accueil Rapide"
-                heroSub.text = label
-            }
+            t.setShadowLayer(if (has) 0f else p(8).toFloat(), 0f, p(2).toFloat(), Color.argb(120, 0, 0, 0))
+            if (has) setHero("Accueil Rapide", label)
         }
         t.setOnClickListener { action() }
+        val lp = LinearLayout.LayoutParams(-2, -2)
+        lp.setMargins(p(4), 0, p(4), 0)
+        t.layoutParams = lp
         return t
+    }
+
+    private fun setHero(title: String, sub: String) {
+        if (heroTitle.text.toString() == title) {
+            heroSub.text = sub
+            return
+        }
+        heroTitle.text = title
+        heroSub.text = sub
+        heroTitle.alpha = 0f
+        heroTitle.translationX = -p(40).toFloat()
+        heroTitle.animate().alpha(1f).translationX(0f).setDuration(260)
+            .setInterpolator(DecelerateInterpolator()).start()
+        heroSub.alpha = 0f
+        heroSub.animate().alpha(1f).setStartDelay(80).setDuration(260).start()
+    }
+
+    private fun animateIn(fast: Boolean) {
+        val list = listOf<View>(topBar, heroBox, scroll)
+        for ((i, v) in list.withIndex()) {
+            v.alpha = 0f
+            v.translationY = p(if (fast) 20 else 44).toFloat()
+            v.animate().alpha(1f).translationY(0f)
+                .setStartDelay(if (fast) 0L else i * 90L)
+                .setDuration(if (fast) 220L else 460L)
+                .setInterpolator(DecelerateInterpolator(1.6f))
+                .start()
+        }
     }
 
     private fun buildUi() {
         val white = Color.WHITE
         val soft = Color.argb(215, 255, 255, 255)
 
-        val root = FrameLayout(this)
-        root.background = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.rgb(28, 28, 36), Color.BLACK, Color.BLACK)
-        )
+        root = FrameLayout(this)
+        root.setBackgroundColor(Color.BLACK)
         bg = NatureView(this)
+        bg.onFrame = { for (g in glass) g.invalidate() }
         root.addView(bg, FrameLayout.LayoutParams(-1, -1))
         dim = View(this)
-        dim.setBackgroundColor(Color.argb(140, 0, 0, 0))
+        dim.setBackgroundColor(Color.argb(120, 0, 0, 0))
         root.addView(dim, FrameLayout.LayoutParams(-1, -1))
 
         val col = LinearLayout(this)
@@ -200,53 +260,55 @@ class MainActivity : Activity() {
         col.setPadding(p(80), p(36), p(80), 0)
         root.addView(col, FrameLayout.LayoutParams(-1, -1))
 
-        val top = LinearLayout(this)
-        top.gravity = Gravity.CENTER_VERTICAL
-        top.clipChildren = false
+        topBar = LinearLayout(this)
+        topBar.gravity = Gravity.CENTER_VERTICAL
+        topBar.clipChildren = false
 
-        val brand = tv(40, accent, "sans-serif-black")
-        brand.text = "ACCUEIL"
-        brand.letterSpacing = 0.08f
-        val blp = LinearLayout.LayoutParams(-2, -2)
-        blp.rightMargin = p(48)
-        top.addView(brand, blp)
-
-        top.addView(tab("Accueil") {
+        val navPill = glassPill(40)
+        navPill.setPadding(p(10), p(8), p(10), p(8))
+        val navRow = row()
+        navRow.addView(tab("Accueil") {
             scroll.smoothScrollTo(0, 0)
             if (favRow.childCount > 0) favRow.getChildAt(0).requestFocus()
         })
-        top.addView(tab("Applis") {
+        navRow.addView(tab("Applis") {
             if (appsRow.childCount > 0) appsRow.getChildAt(0).requestFocus()
         })
-        top.addView(tab("Menu") { showMenu() })
+        navRow.addView(tab("Boutique") { openStore() })
+        menuTab = tab("Menu") { toggleMenu() }
+        navRow.addView(menuTab)
+        navPill.addView(navRow)
+        topBar.addView(navPill, LinearLayout.LayoutParams(-2, -2))
 
-        top.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        topBar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+
+        val clockPill = glassPill(40)
+        clockPill.setPadding(p(32), p(16), p(32), p(16))
         clockTv = tv(30, white, "sans-serif-medium")
-        top.addView(clockTv)
-        col.addView(top, LinearLayout.LayoutParams(-1, -2))
+        clockPill.addView(clockTv)
+        topBar.addView(clockPill, LinearLayout.LayoutParams(-2, -2))
+        col.addView(topBar, LinearLayout.LayoutParams(-1, -2))
 
-        val hero = LinearLayout(this)
-        hero.orientation = LinearLayout.VERTICAL
-        hero.gravity = Gravity.BOTTOM
-        hero.setPadding(p(26), 0, 0, p(10))
+        heroBox = LinearLayout(this)
+        heroBox.orientation = LinearLayout.VERTICAL
+        heroBox.gravity = Gravity.BOTTOM
+        heroBox.setPadding(p(26), 0, 0, p(10))
         heroTitle = tv(72, white, "sans-serif-medium")
         heroTitle.maxLines = 1
         heroTitle.text = "Accueil Rapide"
         heroSub = tv(28, soft)
         heroSub.text = "Tes applis, sans pub"
-        val chip = tv(26, Color.BLACK, "sans-serif-medium")
-        chip.text = "OK : ouvrir"
+        heroBox.addView(heroTitle)
+        heroBox.addView(heroSub)
+        val chip = glassPill(30)
         chip.setPadding(p(30), p(10), p(30), p(10))
-        val cd = GradientDrawable()
-        cd.cornerRadius = p(30).toFloat()
-        cd.setColor(Color.WHITE)
-        chip.background = cd
-        hero.addView(heroTitle)
-        hero.addView(heroSub)
+        val chipText = tv(26, white, "sans-serif-medium")
+        chipText.text = "OK  ·  ouvrir"
+        chip.addView(chipText)
         val clp = LinearLayout.LayoutParams(-2, -2)
         clp.topMargin = p(18)
-        hero.addView(chip, clp)
-        col.addView(hero, LinearLayout.LayoutParams(-1, p(280)))
+        heroBox.addView(chip, clp)
+        col.addView(heroBox, LinearLayout.LayoutParams(-1, p(280)))
 
         scroll = ScrollView(this)
         scroll.isVerticalScrollBarEnabled = false
@@ -273,7 +335,108 @@ class MainActivity : Activity() {
         scroll.addView(rows)
         col.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
+        menuPanel = glassPill(36)
+        menuPanel.setPadding(p(14), p(14), p(14), p(14))
+        menuList = LinearLayout(this)
+        menuList.orientation = LinearLayout.VERTICAL
+        menuPanel.addView(menuList)
+        menuPanel.visibility = View.GONE
+        root.addView(menuPanel, FrameLayout.LayoutParams(p(560), -2))
+
         setContentView(root)
+        root.viewTreeObserver.addOnGlobalFocusChangeListener { _, n ->
+            if (menuOpen && n != null && !inMenu(n)) closeMenu(false)
+        }
+        animateIn(false)
+    }
+
+    private fun inMenu(v: View): Boolean {
+        var c: View? = v
+        while (c != null) {
+            if (c === menuPanel) return true
+            c = c.parent as? View
+        }
+        return false
+    }
+
+    private fun menuItem(label: String, action: () -> Unit): TextView {
+        val t = tv(28, Color.WHITE, "sans-serif-medium")
+        t.text = label
+        t.setPadding(p(28), p(16), p(28), p(16))
+        val d = GradientDrawable()
+        d.cornerRadius = p(24).toFloat()
+        d.setColor(Color.TRANSPARENT)
+        t.background = d
+        t.isFocusable = true
+        t.isClickable = true
+        t.setOnFocusChangeListener { _, has ->
+            d.setColor(if (has) Color.WHITE else Color.TRANSPARENT)
+            t.setTextColor(if (has) Color.BLACK else Color.WHITE)
+        }
+        t.setOnClickListener {
+            closeMenu(true)
+            action()
+        }
+        return t
+    }
+
+    private fun toggleMenu() {
+        if (menuOpen) closeMenu(true) else showMenu()
+    }
+
+    private fun showMenu() {
+        val loc = IntArray(2)
+        menuTab.getLocationInWindow(loc)
+        val lp = menuPanel.layoutParams as FrameLayout.LayoutParams
+        lp.leftMargin = loc[0]
+        lp.topMargin = loc[1] + menuTab.height + p(16)
+        menuPanel.layoutParams = lp
+
+        val bgName = when (bgMode()) {
+            "noir" -> "Noir"
+            "nature" -> "Paysages"
+            else -> "Aurore animée"
+        }
+        menuList.removeAllViews()
+        menuList.addView(menuItem("Réglages Fire TV") {
+            go(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        })
+        menuList.addView(menuItem("Wi-Fi") {
+            go(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        })
+        menuList.addView(menuItem("Affichage") {
+            go(Intent(Settings.ACTION_DISPLAY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        })
+        menuList.addView(menuItem("Boutique Amazon") { openStore() })
+        menuList.addView(menuItem("Fond : $bgName") { cycleBg() })
+
+        menuPanel.animate().cancel()
+        menuPanel.visibility = View.VISIBLE
+        menuPanel.alpha = 0f
+        menuPanel.pivotY = 0f
+        menuPanel.scaleY = 0.85f
+        menuPanel.translationY = -p(16).toFloat()
+        menuPanel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(220)
+            .setInterpolator(DecelerateInterpolator()).start()
+        menuOpen = true
+        menuList.getChildAt(0).requestFocus()
+    }
+
+    private fun closeMenu(refocus: Boolean) {
+        if (!menuOpen) return
+        menuOpen = false
+        menuPanel.animate().cancel()
+        menuPanel.animate().alpha(0f).translationY(-p(10).toFloat()).setDuration(150)
+            .withEndAction { menuPanel.visibility = View.GONE }.start()
+        if (refocus) menuTab.requestFocus()
+    }
+
+    private fun openStore() {
+        val pm = packageManager
+        val i = pm.getLeanbackLaunchIntentForPackage("com.amazon.venezia")
+            ?: pm.getLaunchIntentForPackage("com.amazon.venezia")
+        if (i != null) go(i)
+        else Toast.makeText(this, "Boutique Amazon introuvable", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateClock() {
@@ -282,29 +445,6 @@ class MainActivity : Activity() {
         val d = SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(now)
             .replaceFirstChar { it.uppercase() }
         clockTv.text = "$h   ·   $d"
-    }
-
-    private fun showMenu() {
-        val items = arrayOf(
-            "Réglages Fire TV",
-            "Wi-Fi",
-            "Affichage",
-            if (nature()) "Fond noir" else "Fond nature (paysages)"
-        )
-        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Menu")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> go(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    1 -> go(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    2 -> go(Intent(Settings.ACTION_DISPLAY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    3 -> {
-                        prefs.edit().putString("bg", if (nature()) "noir" else "nature").apply()
-                        applyBg()
-                    }
-                }
-            }
-            .show()
     }
 
     private fun loadApps(): List<App> {
@@ -382,37 +522,55 @@ class MainActivity : Activity() {
         return false
     }
 
-    private fun focusFx(v: View, rd: GradientDrawable, title: String, sub: String) {
+    private fun focusFx(v: View, rd: GradientDrawable, title: String, sub: String, bar: View?) {
         v.isFocusable = true
         v.isClickable = true
         v.setOnFocusChangeListener { view, has ->
             val s = if (has) 1.1f else 1f
-            view.animate().scaleX(s).scaleY(s).setDuration(120).start()
+            view.animate().scaleX(s).scaleY(s)
+                .setDuration(if (has) 240L else 160L)
+                .setInterpolator(if (has) OvershootInterpolator(1.5f) else DecelerateInterpolator())
+                .start()
             view.elevation = if (has) p(16).toFloat() else 0f
             if (has) {
                 rd.setStroke(p(5), Color.WHITE)
-                heroTitle.text = title
-                heroSub.text = sub
+                setHero(title, sub)
             } else {
                 rd.setStroke(0, Color.TRANSPARENT)
             }
+            bar?.animate()?.alpha(if (has) 1f else 0f)
+                ?.translationY(if (has) 0f else p(24).toFloat())
+                ?.setDuration(200)?.start()
         }
     }
 
     private fun card(a: App, w: Int, h: Int, isFav: Boolean, tag: String): View {
         val f = FrameLayout(this)
         val base = GradientDrawable()
-        base.cornerRadius = p(20).toFloat()
-        base.setColor(Color.rgb(34, 34, 42))
+        base.cornerRadius = p(22).toFloat()
+        base.setColor(Color.rgb(30, 30, 40))
         f.background = base
         f.clipToOutline = true
 
         val img = ImageView(this)
         val ban = banner(a)
+        var bar: View? = null
         if (ban != null) {
             img.setImageDrawable(ban)
             img.scaleType = ImageView.ScaleType.CENTER_CROP
             f.addView(img, FrameLayout.LayoutParams(-1, -1))
+
+            val gb = GlassFrame(this, bg, 0f, 0f, false)
+            gb.setBackgroundColor(Color.argb(90, 0, 0, 0))
+            val name = tv(24, Color.WHITE, "sans-serif-medium")
+            name.text = a.label
+            name.maxLines = 1
+            name.setPadding(p(18), p(10), p(18), p(10))
+            gb.addView(name)
+            gb.alpha = 0f
+            gb.translationY = p(24).toFloat()
+            f.addView(gb, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            bar = gb
         } else {
             img.setImageDrawable(icon(a))
             val s = p(h / 2)
@@ -423,9 +581,16 @@ class MainActivity : Activity() {
             f.addView(name, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
         }
 
+        val gloss = View(this)
+        gloss.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.argb(48, 255, 255, 255), Color.argb(0, 255, 255, 255))
+        )
+        f.addView(gloss, FrameLayout.LayoutParams(-1, p(80), Gravity.TOP))
+
         val ring = View(this)
         val rd = GradientDrawable()
-        rd.cornerRadius = p(20).toFloat()
+        rd.cornerRadius = p(22).toFloat()
         rd.setColor(Color.TRANSPARENT)
         ring.background = rd
         f.addView(ring, FrameLayout.LayoutParams(-1, -1))
@@ -436,7 +601,7 @@ class MainActivity : Activity() {
         f.tag = tag
         val sub = if (isFav) "Favori  ·  maintiens OK pour retirer"
         else "Maintiens OK pour ajouter aux favoris"
-        focusFx(f, rd, a.label, sub)
+        focusFx(f, rd, a.label, sub, bar)
         f.setOnClickListener { go(a.intent) }
         f.setOnLongClickListener { toggleFav(a.pkg, tag); true }
         return f
